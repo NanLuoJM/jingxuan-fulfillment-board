@@ -1,0 +1,1583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鲸选数字云仓履约看板</title>
+<style>
+/* ============================================================
+   鲸选数字云仓履约看板
+   色温即时间压力：冷（冷冻蓝／冷藏绿）＝常态，暖（琥珀／红）＝告警
+   舞台 1920×1080 绝对布局，外层等比缩放。零外部依赖。
+
+   行高分配（合计 1080）：
+   padding 44 + gap 14×4=56 + 顶栏 60 + KPI 104 + 趋势 210 + 超时 336 + 底部 270
+   ============================================================ */
+:root{
+  --ink-900:#070B12;
+  --ink-800:#0C1220;
+  --line:rgba(120,160,210,.14);
+  --line-soft:rgba(120,160,210,.08);
+
+  --frost:#7FB8FF;   /* 冷冻 · 主色 */
+  --mint:#37E0B0;    /* 冷藏 · 达标 */
+  --amber:#FFAE33;   /* 常温 · 预警 */
+  --ember:#FF4757;   /* 超时 · 告警 */
+
+  --past:#9B8CFF;    /* 昨日参照 —— 刻意避开琥珀/红/绿，那三色已被告警语义占用 */
+
+  --mt:#FFD100;      /* 美团 */
+  --ele:#0091FF;     /* 饿了么 */
+  --jd:#E1251B;      /* 京东 */
+
+  --text:#DCE7F5;
+  --muted:#6E829E;
+  --dim:#465872;
+
+  --f-display:"Bahnschrift","DIN Alternate","Oswald","Arial Narrow","Segoe UI",sans-serif;
+  --f-cn:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Noto Sans SC",sans-serif;
+  --f-mono:"Cascadia Mono","Consolas",ui-monospace,"SFMono-Regular",monospace;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+
+html,body{
+  width:100%;height:100%;overflow:hidden;
+  background:var(--ink-900);
+  font-family:var(--f-cn);
+  color:var(--text);
+  -webkit-font-smoothing:antialiased;
+}
+body{font-variant-numeric:tabular-nums}
+
+#viewport{
+  position:fixed;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  background:
+    radial-gradient(1200px 700px at 22% -10%, #16233b 0%, transparent 62%),
+    radial-gradient(900px 600px at 92% 105%, #101a2c 0%, transparent 60%),
+    var(--ink-900);
+}
+#stage{
+  width:1920px;height:1080px;
+  transform-origin:center center;
+  padding:22px;
+  display:flex;flex-direction:column;gap:14px;
+  position:relative;
+}
+
+/* ── 通用卡片 ───────────────────────────────────── */
+.card{
+  background:linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015));
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:18px;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+}
+.card-hd{
+  display:flex;align-items:center;gap:12px;
+  height:28px;flex:none;margin-bottom:10px;
+}
+.card-title{font-size:19px;font-weight:600;letter-spacing:.5px}
+.card-sub{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:12px;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim);
+}
+.card-meta{margin-left:auto;font-size:13px;color:var(--muted)}
+.card-meta b{font-family:var(--f-display);font-weight:600;font-size:15px}
+
+/* ── 顶栏 ───────────────────────────────────────── */
+.topbar{
+  height:60px;flex:none;
+  display:flex;align-items:center;gap:24px;
+  border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center}
+.brand-txt{display:flex;flex-direction:column;gap:3px}
+.brand-name{font-size:24px;font-weight:700;letter-spacing:2px;line-height:1}
+.brand-en{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:11px;letter-spacing:3.2px;color:var(--dim);line-height:1;
+}
+.ctx{display:flex;align-items:center;gap:20px;margin-left:8px}
+.ctx-item{display:flex;align-items:baseline;gap:7px}
+.ctx-k{font-size:12px;color:var(--dim);letter-spacing:.5px}
+.ctx-v{font-size:15px;font-weight:500}
+.clock{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:30px;font-weight:600;letter-spacing:1.5px;line-height:1;
+}
+.clock .cs{color:var(--frost);font-size:20px}
+.live{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.live-dot{
+  width:7px;height:7px;border-radius:50%;background:var(--mint);
+  animation:pulse 2.4s ease-out infinite;
+}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(55,224,176,.5)}
+  70%{box-shadow:0 0 0 7px rgba(55,224,176,0)}
+  100%{box-shadow:0 0 0 0 rgba(55,224,176,0)}
+}
+
+/* ── 告警条（工业告警面板：常驻单行，永不遮挡数据）── */
+.annun{
+  margin-left:auto;width:470px;height:44px;flex:none;
+  display:flex;align-items:center;
+  border:1px solid var(--line);border-radius:7px;
+  background:rgba(8,14,24,.7);overflow:hidden;
+  transition:border-color .35s;
+}
+.annun-tag{
+  width:74px;height:100%;flex:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  background:rgba(55,224,176,.1);
+  border-right:1px solid var(--line);
+  transition:background .35s;
+}
+.annun-tag-t{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:10px;letter-spacing:1.6px;line-height:1;color:var(--mint);
+  transition:color .35s;
+}
+.annun-tag-n{
+  font-family:var(--f-display);font-size:19px;font-weight:600;
+  line-height:1;color:var(--mint);transition:color .35s;
+}
+.annun-body{flex:1;min-width:0;padding:0 14px;display:flex;align-items:center;gap:10px}
+.annun-time{font-family:var(--f-mono);font-size:12px;color:var(--dim);flex:none}
+.annun-msg{
+  font-size:14px;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.annun[data-alert="1"]{border-color:rgba(255,71,87,.4)}
+.annun[data-alert="1"] .annun-tag{background:rgba(255,71,87,.14)}
+.annun[data-alert="1"] .annun-tag-t,
+.annun[data-alert="1"] .annun-tag-n{color:var(--ember)}
+.annun[data-alert="1"] .annun-msg{color:#FFD3D7}
+.annun-roll{animation:rollIn .4s ease-out}
+@keyframes rollIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+
+
+/* ── ① KPI 条：五个环节容器，各含主指标 + 副指标 ── */
+.kpi{height:110px;flex:none;display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.kcell{
+  border:1px solid var(--line);border-radius:10px;
+  background:linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.012));
+  padding:12px 16px;
+  display:flex;flex-direction:column;justify-content:center;gap:5px;
+  position:relative;overflow:hidden;
+}
+.kk{display:flex;align-items:baseline;gap:8px;font-size:13px;color:var(--text);letter-spacing:.6px}
+.kk-en{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:10px;letter-spacing:2px;color:var(--dim);
+}
+
+/* 固定比例栅格：五张卡的分隔线落在同一相对位置，标签行与数字行各自基线对齐 */
+.kbody{
+  display:grid;
+  grid-template-columns:1.35fr 1px 1fr;
+  column-gap:14px;row-gap:4px;
+  align-items:baseline;
+}
+.kb-l1{grid-area:1/1}
+.kb-l2{grid-area:1/3}
+.kb-v1{grid-area:2/1}
+.kb-v2{grid-area:2/3}
+.kdiv{grid-area:1/2/3/3;align-self:stretch;background:var(--line)}
+
+.kv-lb{font-size:12px;color:var(--muted);white-space:nowrap;letter-spacing:.3px}
+.kv-row{display:flex;align-items:baseline;gap:5px;min-width:0}
+.kv-row i{font-style:normal;font-size:12px;color:var(--dim)}
+.kv-num{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:38px;font-weight:600;line-height:1;letter-spacing:-1.5px;color:var(--frost);
+}
+.kv-n2{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:26px;font-weight:600;line-height:1;letter-spacing:-.5px;color:var(--text);
+}
+
+/* 拣选超载：实心反白块，比发光更像真实告警灯 */
+.kcell[data-alarm="1"]{
+  background:var(--ember);border-color:var(--ember);
+  animation:alarmBreath 1.6s ease-in-out infinite;
+}
+.kcell[data-alarm="1"] .kk,
+.kcell[data-alarm="1"] .kk-en,
+.kcell[data-alarm="1"] .kv-lb,
+.kcell[data-alarm="1"] .kv-row i{color:rgba(10,16,27,.75)}
+.kcell[data-alarm="1"] .kv-num,
+.kcell[data-alarm="1"] .kv-n2{color:#0A101B}
+.kcell[data-alarm="1"] .kdiv{background:rgba(10,16,27,.28)}
+@keyframes alarmBreath{0%,100%{filter:brightness(1)}50%{filter:brightness(.84)}}
+.overload-tag{
+  display:none;align-items:center;gap:6px;
+  position:absolute;top:10px;right:12px;
+  font-size:11px;font-weight:700;letter-spacing:.5px;color:#0A101B;
+  background:rgba(10,16,27,.14);border:1px solid rgba(10,16,27,.3);
+  border-radius:5px;padding:2px 7px;
+}
+.kcell[data-alarm="1"] .overload-tag{display:flex}
+
+/* ── ② 订单趋势图 ───────────────────────────────── */
+.trend-row{height:210px;flex:none}
+.trend-legend{display:flex;align-items:center;gap:16px;font-size:12px;color:var(--muted)}
+.tl{display:inline-flex;align-items:center;gap:6px}
+.tl i{width:16px;height:0;border-top-width:2px;border-top-style:solid;display:inline-block}
+.tl-today i{border-color:var(--frost)}
+.tl-book i{border-top-style:dashed;border-color:var(--frost);opacity:.72}
+.tl-yest i{border-top-style:dashed;border-color:var(--past)}
+.trend-plot{width:100%;height:136px;display:block}
+.trend-plot .grid{stroke:rgba(120,160,210,.1);stroke-width:1}
+.trend-plot .vgrid{stroke:rgba(120,160,210,.06);stroke-width:1}
+.trend-plot .axis-t{fill:var(--dim);font-family:var(--f-mono);font-size:11px;text-anchor:middle}
+.trend-plot .y-t{fill:var(--dim);font-family:var(--f-mono);font-size:10px;text-anchor:end}
+
+/* 昨日＝安静的参照，今日预约＝今日那条线的延续，两者必须一眼分得开 */
+.trend-plot .ln-yest{fill:none;stroke:var(--past);stroke-width:1.8;stroke-dasharray:5 4;opacity:.9;stroke-linejoin:round}
+.trend-plot .ln-today{fill:none;stroke:var(--frost);stroke-width:2.6;stroke-linejoin:round;stroke-linecap:round}
+.trend-plot .ln-book{fill:none;stroke:var(--frost);stroke-width:2.6;stroke-dasharray:9 5;opacity:.72;stroke-linejoin:round;stroke-linecap:round}
+.trend-plot .ar-today{fill:url(#todayFill)}
+.trend-plot .ar-book{fill:url(#bookFill)}
+
+/* 每点圆点 + 数值标签 */
+.trend-plot .pt{stroke:var(--ink-900);stroke-width:1.5}
+.trend-plot .pt-today{fill:var(--frost)}
+.trend-plot .pt-book{fill:var(--frost);opacity:.72}
+.trend-plot .pt-yest{fill:var(--past);opacity:.9}
+.trend-plot .lb{font-family:var(--f-display);font-variation-settings:"wdth" 87.5;font-size:12px;font-weight:600;text-anchor:middle}
+.trend-plot .lb-today{fill:#BBD8FF}
+.trend-plot .lb-book{fill:#8FB4E4}
+.trend-plot .lb-yest{fill:#B7ACFF}
+
+.trend-plot .now-chip{fill:rgba(255,174,51,.16);stroke:rgba(255,174,51,.5);stroke-width:1}
+.trend-plot .now-ln{stroke:var(--amber);stroke-width:1;stroke-dasharray:3 3;opacity:.75}
+.trend-plot .now-t{fill:var(--amber);font-family:var(--f-cn);font-size:10px;text-anchor:middle}
+
+/* ── ③ 超时双列表 ───────────────────────────────── */
+.mid{height:336px;flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+/* 渠道 | 订单序号 | 单号 | 时长 | 状态 —— 四张表同构；单卡仅 458px，列宽按最长内容卡死 */
+.thead,.trow{
+  display:grid;align-items:center;column-gap:8px;padding:0 6px;
+  grid-template-columns:46px 46px 1fr 50px 44px;
+}
+.t-seq{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:17px;font-weight:600;color:var(--text);letter-spacing:.3px;
+}
+.trow[data-level="warn"] .t-seq{color:#FFE0B2}
+.trow[data-level="over"] .t-seq{color:#fff}
+
+.thead{
+  height:28px;flex:none;
+  font-family:var(--f-cn);
+  font-size:11px;letter-spacing:0;color:var(--dim);
+  border-bottom:1px solid var(--line);
+}
+/* 列宽已按内容卡死，表头一律不折行 */
+.thead > span{white-space:nowrap}
+.thead .th-cn{font-family:var(--f-cn);font-size:11px;letter-spacing:0;white-space:nowrap}
+.tbody{flex:1;min-height:0;overflow:hidden;padding-top:4px}
+.trow{height:29px;border-bottom:1px solid var(--line-soft);font-size:13px;color:var(--muted)}
+.t-no{font-family:var(--f-mono);font-size:12px;color:var(--dim);letter-spacing:.2px}
+.t-dur{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:17px;font-weight:600;text-align:right;color:var(--muted);letter-spacing:.5px;
+}
+.t-badge{
+  justify-self:start;font-size:10px;letter-spacing:0;white-space:nowrap;
+  padding:2px 4px;border-radius:4px;border:1px solid currentColor;color:var(--dim);
+}
+.trow[data-level="warn"]{color:#FFE0B2}
+.trow[data-level="warn"] .t-no{color:rgba(255,174,51,.72)}
+.trow[data-level="warn"] .t-dur,
+.trow[data-level="warn"] .t-badge{color:var(--amber)}
+.trow[data-level="over"]{
+  color:#FFD3D7;
+  background:linear-gradient(90deg, rgba(255,71,87,.14), rgba(255,71,87,0) 72%);
+}
+.trow[data-level="over"] .t-no{color:rgba(255,71,87,.78)}
+.trow[data-level="over"] .t-dur,
+.trow[data-level="over"] .t-badge{color:var(--ember)}
+.trow-more{
+  height:22px;display:flex;align-items:center;padding:0 10px;
+  font-size:11px;color:var(--dim);letter-spacing:.5px;
+}
+
+/* 平台 chip */
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text);white-space:nowrap}
+.chip::before{content:"";width:3px;height:13px;border-radius:2px;background:var(--c);flex:none}
+.chip[data-p="mt"]{--c:var(--mt)}
+.chip[data-p="ele"]{--c:var(--ele)}
+.chip[data-p="jd"]{--c:var(--jd)}
+
+/* 卡片一分为二：左栏专给超时预警量，右栏是明细 */
+.split{flex:1;min-height:0;display:grid;grid-template-columns:100px 1fr;gap:12px}
+.detail{display:flex;flex-direction:column;min-height:0}
+
+.warn-pane{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  border-right:1px solid var(--line);
+  background:linear-gradient(90deg, rgba(255,174,51,.11), rgba(255,174,51,0) 88%);
+  transition:background .4s;
+}
+.wp-k{font-size:12px;color:var(--amber);letter-spacing:1.2px;transition:color .4s}
+.wp-n{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:64px;font-weight:600;line-height:.94;letter-spacing:-2px;
+  color:var(--amber);margin-top:2px;transition:color .4s;
+}
+.wp-u{font-size:12px;color:var(--muted);margin-top:2px}
+.wp-std{
+  width:88%;margin-top:14px;padding-top:11px;
+  border-top:1px solid var(--line-soft);
+  display:flex;flex-direction:column;gap:4px;align-items:center;
+  font-size:10px;color:var(--dim);white-space:nowrap;
+}
+.wp-std b{font-family:var(--f-display);font-size:12px;font-weight:600;color:var(--muted)}
+/* 归零时整栏沉下去，只有非零才亮起来 */
+.warn-pane[data-zero="1"]{background:none}
+.warn-pane[data-zero="1"] .wp-k,
+.warn-pane[data-zero="1"] .wp-n{color:var(--dim)}
+
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.empty-icn{font-family:var(--f-display);font-size:28px;color:rgba(55,224,176,.5)}
+.empty-t{font-size:14px;color:var(--muted)}
+
+/* ── ④⑤⑥ 底部三卡 ─────────────────────────────── */
+.bottom{height:264px;flex:none;display:grid;grid-template-columns:486px 596px 766px;gap:14px}
+
+/* 待收货上架余量：标件（按件）/ 计重（按 KG），各分收货、上架两段 */
+.rcv-list{display:flex;flex-direction:column;justify-content:center;gap:14px;flex:1}
+.rcv{border-left:3px solid var(--acc);padding-left:12px;display:flex;flex-direction:column;gap:6px}
+.rcv[data-k="piece"]{--acc:var(--frost)}
+.rcv[data-k="weight"]{--acc:var(--mint)}
+.rcv-hd{display:flex;align-items:baseline;gap:8px}
+.rcv-name{font-size:15px;font-weight:600}
+.rcv-unit{font-size:11px;color:var(--dim)}
+/* 收货 | 分隔线 | 上架，两段等宽，标件与计重的同名指标上下对齐 */
+.rcv-stages{display:grid;grid-template-columns:1fr 1px 1fr;column-gap:14px}
+.rcv-div{background:var(--line)}
+.rs{display:flex;flex-direction:column;gap:4px;min-width:0}
+.rs-top{display:flex;align-items:baseline;justify-content:space-between}
+.rs-k{font-size:11px;color:var(--muted);white-space:nowrap}
+.rs-rate{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:22px;font-weight:600;line-height:1;color:var(--acc);
+}
+.rs-rate i{font-style:normal;font-size:12px;color:var(--muted);margin-left:1px}
+.rs-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+/* display:block 必需 —— 填充条是 span，inline 元素会忽略 width/height */
+.rs-fill{display:block;height:100%;border-radius:3px;background:var(--acc);transition:width .7s cubic-bezier(.22,1,.36,1)}
+.rs-nums{display:grid;grid-template-columns:1fr 1fr;column-gap:8px;margin-top:2px}
+.rs-n{display:flex;align-items:baseline;gap:4px;white-space:nowrap;min-width:0}
+.rs-n span{font-size:11px;color:var(--dim)}
+.rs-n b{font-family:var(--f-display);font-variation-settings:"wdth" 87.5;font-size:14px;font-weight:600;color:var(--text)}
+
+/* 人效排名 */
+.rank-list{display:flex;flex-direction:column;gap:2px;flex:1}
+.rank{height:21px;display:grid;grid-template-columns:22px 70px 1fr 86px 66px;align-items:center;column-gap:10px}
+.rk-no{
+  font-family:var(--f-display);font-size:13px;font-weight:600;text-align:center;
+  color:var(--dim);border-radius:4px;line-height:16px;height:16px;
+}
+.rank[data-top="1"] .rk-no{background:rgba(255,209,0,.16);color:#FFD100}
+.rank[data-top="2"] .rk-no{background:rgba(200,214,232,.14);color:#C8D6E8}
+.rank[data-top="3"] .rk-no{background:rgba(214,138,74,.16);color:#D68A4A}
+.rk-name{font-size:14px;color:var(--text)}
+.rk-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.035);overflow:hidden}
+.rk-fill{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg, rgba(127,184,255,.16), var(--frost));transition:width .7s cubic-bezier(.22,1,.36,1)}
+.rank[data-top="1"] .rk-fill{background:linear-gradient(90deg, rgba(255,209,0,.16), #FFD100)}
+.rk-val{display:flex;align-items:baseline;justify-content:flex-end;gap:4px}
+.rk-main{font-family:var(--f-display);font-variation-settings:"wdth" 87.5;font-size:17px;font-weight:600;color:var(--text)}
+.rk-sub{font-family:var(--f-mono);font-size:10px;color:var(--dim)}
+/* 履约率：按达标线着色，一眼看出谁掉队 */
+.rk-rate{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:16px;font-weight:600;text-align:right;letter-spacing:.3px;
+}
+.rk-rate i{font-style:normal;font-size:10px;margin-left:1px;opacity:.7}
+.rk-rate[data-lv="good"]{color:var(--mint)}
+.rk-rate[data-lv="warn"]{color:var(--amber)}
+.rk-rate[data-lv="bad"]{color:var(--ember)}
+
+/* 履约质量 */
+/* 左：核心指标「订单履约率」整栏放大；右：其余三个比率 + 绝望订单，2×2 小卡 */
+.quality-wrap{flex:1;min-height:0;display:grid;grid-template-columns:220px 1fr;gap:14px}
+.quality-grid{min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:14px}
+
+/* ★ 核心：大圆环 + 环内大数字，背景按达标色微染 */
+.q-hero{
+  position:relative;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--qb);border-radius:10px;
+  background:radial-gradient(circle at 50% 50%, var(--qg) 0%, rgba(0,0,0,0) 68%), rgba(255,255,255,.025);
+}
+.q-hero[data-lv="good"]{--q:var(--mint); --qb:rgba(55,224,176,.38); --qg:rgba(55,224,176,.13)}
+.q-hero[data-lv="warn"]{--q:var(--amber);--qb:rgba(255,174,51,.38); --qg:rgba(255,174,51,.13)}
+.q-hero[data-lv="bad"] {--q:var(--ember);--qb:rgba(255,71,87,.45);  --qg:rgba(255,71,87,.15)}
+.hero-ring{width:160px;height:160px;transform:rotate(-90deg)}
+.hero-ring circle{fill:none;stroke-width:12;stroke-linecap:round}
+.hero-ring .h-bg{stroke:rgba(255,255,255,.07)}
+.hero-ring .h-fg{stroke:var(--q);transition:stroke-dasharray .8s cubic-bezier(.22,1,.36,1)}
+.hero-in{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+.hero-k{font-size:14px;color:var(--text);letter-spacing:1.5px}
+.hero-v{display:flex;align-items:baseline}
+.hero-n{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:54px;font-weight:600;line-height:1;letter-spacing:-1.5px;color:var(--q);
+}
+.hero-p{font-size:18px;color:var(--muted);margin-left:2px}
+.hero-d{font-family:var(--f-mono);font-size:12px;white-space:nowrap}
+.hero-d[data-dir="up"]{color:var(--mint)}
+.hero-d[data-dir="down"]{color:var(--ember)}
+.hero-d[data-dir="flat"]{color:var(--dim)}
+
+/* 小卡：比率与绝望订单同一外形，圆环 / 大号计数占同一列，四张对齐 */
+.qcard{
+  border:1px solid var(--line-soft);border-radius:8px;background:rgba(255,255,255,.022);
+  padding:10px 14px;display:grid;grid-template-columns:48px 1fr;column-gap:12px;align-items:center;
+}
+.donut{width:48px;height:48px;transform:rotate(-90deg)}
+.donut circle{fill:none;stroke-width:5;stroke-linecap:round}
+.d-bg{stroke:rgba(255,255,255,.07)}
+.d-fg{transition:stroke-dasharray .8s cubic-bezier(.22,1,.36,1)}
+.q-right{display:flex;flex-direction:column;gap:3px;min-width:0}
+.q-label{font-size:14px;color:var(--text);white-space:nowrap;letter-spacing:.5px}
+.q-val{display:flex;align-items:baseline;gap:7px}
+.q-num{font-family:var(--f-display);font-variation-settings:"wdth" 87.5;font-size:32px;font-weight:600;line-height:1;letter-spacing:-.5px}
+.q-pct{font-size:14px;color:var(--muted);margin-left:-5px}
+.q-trend{font-family:var(--f-mono);font-size:12px;white-space:nowrap}
+
+/* 绝望订单小卡：左列放计数，右列放口径与对比；归零时整卡沉下去，有单才亮红 */
+.qcard.despair{border-color:rgba(255,71,87,.4);background:linear-gradient(90deg, rgba(255,71,87,.14), rgba(255,71,87,.02))}
+.dp-n{
+  font-family:var(--f-display);font-variation-settings:"wdth" 87.5;
+  font-size:38px;font-weight:600;line-height:1;letter-spacing:-1px;color:var(--ember);text-align:center;
+}
+.dp-rule{font-size:11px;color:var(--muted);white-space:nowrap}
+.dp-tag{font-size:11px;color:var(--dim);letter-spacing:0;margin-left:6px}
+.dp-cmp{font-family:var(--f-mono);font-size:12px;white-space:nowrap}
+.dp-cmp[data-dir="up"]{color:var(--ember)}
+.dp-cmp[data-dir="down"]{color:var(--mint)}
+.dp-cmp[data-dir="flat"]{color:var(--dim)}
+.qcard.despair[data-zero="1"]{border-color:var(--line-soft);background:rgba(255,255,255,.022)}
+.qcard.despair[data-zero="1"] .dp-n{color:var(--dim)}
+.q-trend[data-dir="up"]{color:var(--mint)}
+.q-trend[data-dir="down"]{color:var(--ember)}
+.q-trend[data-dir="flat"]{color:var(--dim)}
+.qcard[data-lv="good"]{--q:var(--mint)}
+.qcard[data-lv="warn"]{--q:var(--amber)}
+.qcard[data-lv="bad"]{--q:var(--ember)}
+.qcard .d-fg{stroke:var(--q)}
+.qcard .q-num{color:var(--q)}
+
+.demo-tag kbd{
+  font-family:var(--f-mono);font-size:11px;
+  background:rgba(255,255,255,.06);border:1px solid var(--line);
+  border-radius:3px;padding:0 5px;color:var(--muted);
+}
+
+.demo-tag{
+  position:absolute;left:22px;bottom:4px;
+  display:flex;align-items:center;gap:8px;
+  font-size:12px;color:var(--muted);letter-spacing:.3px;
+}
+.demo-tag b{color:var(--amber);font-weight:600}
+.demo-sep{color:var(--dim)}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+</style>
+</head>
+<body>
+
+<div id="viewport">
+<div id="stage">
+
+  <!-- ══════════ 顶栏 ══════════ -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-txt">
+        <span class="brand-name">鲸选数字云仓履约看板</span>
+        <span class="brand-en">JINGXUAN CLOUD WAREHOUSE · FULFILLMENT CONTROL</span>
+      </span>
+    </div>
+
+    <div class="ctx">
+      <span class="ctx-item"><span class="ctx-k">仓</span><span class="ctx-v" id="wh-name">丁兰云仓</span></span>
+      <span class="clock" id="clock">00:00<span class="cs">:00</span></span>
+      <span class="live"><span class="live-dot"></span><span id="live-txt">实时</span></span>
+    </div>
+
+    <div class="annun" id="annun" data-alert="0" role="status" aria-live="polite">
+      <div class="annun-tag">
+        <span class="annun-tag-t">ALARM</span>
+        <span class="annun-tag-n" id="annun-count">0</span>
+      </div>
+      <div class="annun-body">
+        <span class="annun-time" id="annun-time">--:--</span>
+        <span class="annun-msg" id="annun-msg">系统就绪，暂无异常</span>
+      </div>
+    </div>
+
+  </header>
+
+  <!-- ══════════ ① KPI 条 ══════════ -->
+  <section class="kpi">
+    <div class="kcell">
+      <div class="kk">订单情况 <span class="kk-en">ORDERS</span></div>
+      <div class="kbody">
+        <span class="kv-lb kb-l1">订单总数</span><span class="kdiv"></span><span class="kv-lb kb-l2">退款数</span>
+        <span class="kv-row kb-v1"><span class="kv-num" id="v-total">0</span><i>单</i></span>
+        <span class="kv-row kb-v2"><span class="kv-n2" id="v-refund" style="color:var(--amber)">0</span><i>单</i></span>
+      </div>
+    </div>
+
+    <div class="kcell" id="k-pick" data-alarm="0">
+      <div class="kk">拣货情况 <span class="kk-en">PICKING</span></div>
+      <div class="overload-tag">⚠ 拣选超载</div>
+      <div class="kbody">
+        <span class="kv-lb kb-l1">拣货中</span><span class="kdiv"></span><span class="kv-lb kb-l2">待拣货</span>
+        <span class="kv-row kb-v1"><span class="kv-num" id="v-picking">0</span><i>单</i></span>
+        <span class="kv-row kb-v2"><span class="kv-n2" id="v-pending">0</span><i>单</i></span>
+      </div>
+    </div>
+
+    <div class="kcell">
+      <div class="kk">复核情况 <span class="kk-en">CHECKING</span></div>
+      <div class="kbody">
+        <span class="kv-lb kb-l1">复核中</span><span class="kdiv"></span><span class="kv-lb kb-l2">待复核</span>
+        <span class="kv-row kb-v1"><span class="kv-num" id="v-checking">0</span><i>单</i></span>
+        <span class="kv-row kb-v2"><span class="kv-n2" id="v-pendcheck">0</span><i>单</i></span>
+      </div>
+    </div>
+
+    <div class="kcell">
+      <div class="kk">配送情况 <span class="kk-en">DELIVERY</span></div>
+      <div class="kbody">
+        <span class="kv-lb kb-l1">配送中</span><span class="kdiv"></span><span class="kv-lb kb-l2">待配送</span>
+        <span class="kv-row kb-v1"><span class="kv-num" id="v-delivering">0</span><i>单</i></span>
+        <span class="kv-row kb-v2"><span class="kv-n2" id="v-penddeliver">0</span><i>单</i></span>
+      </div>
+    </div>
+
+    <div class="kcell">
+      <div class="kk">人员情况 <span class="kk-en">STAFF</span></div>
+      <div class="kbody">
+        <span class="kv-lb kb-l1">在线</span><span class="kdiv"></span><span class="kv-lb kb-l2">离线</span>
+        <span class="kv-row kb-v1"><span class="kv-num" id="v-staff" style="color:var(--mint)">0</span><i>人</i></span>
+        <span class="kv-row kb-v2"><span class="kv-n2" id="v-offline" style="color:var(--dim)">0</span><i>人</i></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ ② 订单趋势图 ══════════ -->
+  <section class="trend-row">
+    <article class="card" style="height:100%">
+      <div class="card-hd">
+        <span class="card-title">订单趋势图</span>
+        <span class="card-sub">0 — 24 H</span>
+        <span class="card-meta" id="meta-trend"></span>
+        <span class="trend-legend">
+          <span class="tl tl-today"><i></i>今日实际</span>
+          <span class="tl tl-book"><i></i>今日预约</span>
+          <span class="tl tl-yest"><i></i>昨日</span>
+        </span>
+      </div>
+      <svg class="trend-plot" id="trend-plot" viewBox="0 0 1840 136" preserveAspectRatio="none" aria-hidden="true"></svg>
+    </article>
+  </section>
+
+  <!-- ══════════ ③ 超时双列表 ══════════ -->
+  <section class="mid">
+    <article class="card" id="card-claim">
+      <div class="card-hd">
+        <span class="card-title">超时订单 · 待领取</span>
+        <span class="card-sub">Claim Overdue</span>
+      </div>
+      <div class="split">
+        <div class="warn-pane" id="meta-claim" data-zero="1">
+          <span class="wp-k">超时预警</span>
+          <span class="wp-n" id="warn-n-claim">0</span>
+          <span class="wp-u">单</span>
+          <span class="wp-std">
+            <span>超时标准 <b id="lg-claim-over">2</b> 分钟</span>
+            <span>预警提前 <b id="lg-claim-warn">1</b> 分钟</span>
+          </span>
+        </div>
+        <div class="detail">
+          <div class="thead">
+            <span class="th-cn">渠道</span><span class="th-cn">订单序号</span><span class="th-cn">单号</span>
+            <span style="text-align:right">已等</span><span>状态</span>
+          </div>
+          <div class="tbody" id="body-claim"></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" id="card-pick">
+      <div class="card-hd">
+        <span class="card-title">超时订单 · 待拣货</span>
+        <span class="card-sub">Pick Overdue</span>
+      </div>
+      <div class="split">
+        <div class="warn-pane" id="meta-pick" data-zero="1">
+          <span class="wp-k">超时预警</span>
+          <span class="wp-n" id="warn-n-pick">0</span>
+          <span class="wp-u">单</span>
+          <span class="wp-std">
+            <span>超时标准 <b id="lg-pick-over">5</b> 分钟</span>
+            <span>预警提前 <b id="lg-pick-warn">2</b> 分钟</span>
+          </span>
+        </div>
+        <div class="detail">
+          <div class="thead">
+            <span class="th-cn">渠道</span><span class="th-cn">订单序号</span><span class="th-cn">单号</span>
+            <span style="text-align:right">已等</span><span>状态</span>
+          </div>
+          <div class="tbody" id="body-pick"></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" id="card-check">
+      <div class="card-hd">
+        <span class="card-title">超时订单 · 待复核</span>
+        <span class="card-sub">Check Overdue</span>
+      </div>
+      <div class="split">
+        <div class="warn-pane" id="meta-check" data-zero="1">
+          <span class="wp-k">超时预警</span>
+          <span class="wp-n" id="warn-n-check">0</span>
+          <span class="wp-u">单</span>
+          <span class="wp-std">
+            <span>超时标准 <b id="lg-ck-over">3</b> 分钟</span>
+            <span>预警提前 <b id="lg-ck-warn">1</b> 分钟</span>
+          </span>
+        </div>
+        <div class="detail">
+          <div class="thead">
+            <span class="th-cn">渠道</span><span class="th-cn">订单序号</span><span class="th-cn">单号</span>
+            <span style="text-align:right">已等</span><span>状态</span>
+          </div>
+          <div class="tbody" id="body-check"></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" id="card-handover">
+      <div class="card-hd">
+        <span class="card-title">超时订单 · 待取货</span>
+        <span class="card-sub">Rider Pickup Overdue</span>
+      </div>
+      <div class="split">
+        <div class="warn-pane" id="meta-handover" data-zero="1">
+          <span class="wp-k">超时预警</span>
+          <span class="wp-n" id="warn-n-ho">0</span>
+          <span class="wp-u">单</span>
+          <span class="wp-std">
+            <span>超时标准 <b id="lg-ho-over">15</b> 分钟</span>
+            <span>预警提前 <b id="lg-ho-warn">5</b> 分钟</span>
+          </span>
+        </div>
+        <div class="detail">
+          <div class="thead">
+            <span class="th-cn">渠道</span><span class="th-cn">订单序号</span><span class="th-cn">单号</span>
+            <span style="text-align:right">未取时长</span><span>状态</span>
+          </div>
+          <div class="tbody" id="body-handover"></div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ══════════ ④⑤⑥ 底部三卡 ══════════ -->
+  <section class="bottom">
+    <article class="card">
+      <div class="card-hd">
+        <span class="card-title">待收货上架余量</span>
+        <span class="card-sub">Receiving &amp; Putaway</span>
+      </div>
+      <div class="rcv-list" id="rcv-list"></div>
+    </article>
+
+    <article class="card">
+      <div class="card-hd">
+        <span class="card-title">人效排名</span>
+        <span class="card-sub">Top 8</span>
+        <span class="card-meta">订单人效 · 履约率</span>
+      </div>
+      <div class="rank-list" id="rank-list"></div>
+    </article>
+
+    <article class="card">
+      <div class="card-hd">
+        <span class="card-title">履约质量</span>
+        <span class="card-sub">Today vs Yesterday</span>
+      </div>
+      <div class="quality-wrap">
+        <div class="q-hero" id="q-hero" data-lv="good"></div>
+        <div class="quality-grid" id="quality-grid"></div>
+      </div>
+    </article>
+  </section>
+
+  <span class="demo-tag" id="demo-tag"></span>
+</div>
+</div>
+
+<script>
+"use strict";
+
+/* ════════════════════════════════════════════════
+   1. 阈值配置（固定值，看板上不提供修改入口）
+   要调整只能改这里的代码；Object.freeze 保证运行时也无法被改写。
+   ════════════════════════════════════════════════ */
+const T = Object.freeze({
+  claimTimeoutSec: 2 * 60,      // 待领取超时标准：任务已分配、员工 2 分钟内未开始领取
+  claimWarnLeadSec: 60,         // 提前 1 分钟预警
+  pickTimeoutSec: 5 * 60,       // 待拣货超时标准 5 分钟
+  pickWarnLeadSec: 2 * 60,      // 提前 2 分钟预警
+  checkTimeoutSec: 3 * 60,      // 待复核超时标准 3 分钟
+  checkWarnLeadSec: 60,         // 提前 1 分钟预警
+  handoverTimeoutSec: 15 * 60,  // 待取货超时标准：骑手未取单 15 分钟
+  handoverWarnLeadSec: 5 * 60,  // 提前 5 分钟预警
+  loadFactor: 1,                // 待拣货 > 在线员工 × 系数 → 拣货情况整格转红
+  refreshMs: 5000               // 数据刷新间隔
+});
+
+/* ════════════════════════════════════════════════
+   2. 工具
+   ════════════════════════════════════════════════ */
+const $ = (id) => document.getElementById(id);
+const rnd = (a, b) => a + Math.random() * (b - a);
+const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const pad2 = (n) => String(n).padStart(2, "0");
+const mmss = (sec) => { sec = Math.max(0, Math.floor(sec)); return pad2(Math.floor(sec / 60)) + ":" + pad2(sec % 60); };
+const hhmm = (d) => pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+const comma = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+const sum = (a) => a.reduce((x, y) => x + y, 0);
+
+/* 三档等级：ok / warn / over */
+function levelOf(waitedSec, timeoutSec, leadSec) {
+  if (waitedSec >= timeoutSec) return "over";
+  if (waitedSec >= timeoutSec - leadSec) return "warn";
+  return "ok";
+}
+
+/* ════════════════════════════════════════════════
+   3. Mock 数据引擎
+   ════════════════════════════════════════════════ */
+const PICKERS = ["张伟","李娜","王芳","刘洋","陈静","杨帆","赵磊","周敏","吴倩","郑浩","孙悦","马涛"];
+const STAFF = ["何鑫","罗媛","邓超","曾磊","彭雪","唐波","石岩","袁静","苏航","范琳","张伟","李娜"];
+const PLATFORMS = [
+  { key:"mt",  short:"美团",  w:0.45 },
+  { key:"ele", short:"饿了么", w:0.32 },
+  { key:"jd",  short:"京东",  w:0.23 }
+];
+
+/* 前置仓典型日内单量曲线：早/午/晚三峰
+   今日与昨日用两条不同形状的基线，不是同一条曲线的缩放 —— 两天本就该长得不一样 */
+const HOUR_SHAPE = [8,4,3,2,2,3, 12,28,42, 55,78,95, 88,52,44,48, 62,88,112,105, 72,45,28,15];  // 今日：晚峰最高
+const YEST_SHAPE = [6,3,2,2,3,5, 18,36,52, 68,92,84, 70,46,50,58, 74,96,90,78, 58,38,22,11];    // 昨日：午峰更早更高，晚峰更平
+
+/* warnN / overN = 常驻在「超时预警」窗口内、以及「已超时」区间内的单数目标。
+   两者都靠随机年龄几乎打不中：预警窗口只有 1 分钟宽，已超时单又会被随机流出带走。
+   而左栏那个数和右栏整张明细全靠它们，所以每轮都要定向补足，否则演示时是空的。 */
+const DEMO = {
+  calm:  { tag:"CALM 平稳",  vol:1.0, pending:[3,8],   staff:[10,13], pickAge:[10,380],  hoAge:[10,470],   pickN:[7,10],  hoN:[6,9],   arrive:0.25, warnN:[1,2], overN:[2,3],
+           picking:[4,9],   checking:[3,7],  delivering:[18,35], offline:[1,3] },
+  busy:  { tag:"BUSY 繁忙",  vol:1.4, pending:[6,12],  staff:[9,11],  pickAge:[60,540],  hoAge:[60,660],   pickN:[8,12],  hoN:[7,11],  arrive:0.55, warnN:[1,3], overN:[4,7],
+           picking:[8,14],  checking:[5,11], delivering:[30,55], offline:[2,4] },
+  storm: { tag:"STORM 爆单", vol:2.1, pending:[42,72], staff:[7,9],   pickAge:[180,900], hoAge:[200,1100], pickN:[14,20], hoN:[11,16], arrive:0.9,  warnN:[2,4], overN:[9,15],
+           picking:[12,20], checking:[9,16], delivering:[55,95], offline:[3,6] }
+};
+let demoMode = new URLSearchParams(location.search).get("demo") || "calm";
+if (!DEMO[demoMode]) demoMode = "calm";
+
+let seq = 8000;
+const nextNo = () => "JX" + (++seq);
+
+/* 订单序号：今日第 N 单，仓内口头沟通用的短号，区别于完整单号 */
+let daySeq = 0;
+const nextSeq = () => ++daySeq;
+
+/* 收货上架演示参数：k = 到货量倍数，recv / put = 收货率、上架率的目标值 */
+const RCV_TIER = {
+  calm:  { k: 1.0,  recv: 0.86, put: 0.89 },
+  busy:  { k: 1.25, recv: 0.77, put: 0.80 },
+  storm: { k: 1.6,  recv: 0.62, put: 0.66 }
+};
+const RCV_SPEC = {
+  piece:  { base: 1280, round: (v) => Math.round(v),           step: () => rndInt(3, 12), load: () => rndInt(40, 120) },
+  weight: { base: 3860, round: (v) => Math.round(v * 10) / 10, step: () => rnd(8, 30),    load: () => rnd(100, 300) }
+};
+
+const MockEngine = {
+  claimOrders: [], pickOrders: [], checkOrders: [], handoverOrders: [],
+  receiving: null, staffPerf: [], quality: null,
+  yesterday: [], today: [],
+  onlineStaff: 0, offlineStaff: 0, pendingPick: 0,
+  picking: 0, checking: 0, delivering: 0,
+
+  init() { this.buildStaffPerf(); this.reseed(); },
+
+  /* 订单趋势：昨日全 24 小时；今日 0→当前小时为实际，之后为已知预约作业单 */
+  buildTrend() {
+    const cfg = DEMO[demoMode];
+    const h = new Date().getHours();
+    this.yesterday = YEST_SHAPE.map((v) => Math.round(v * rnd(0.9, 1.1)));
+    this.today = HOUR_SHAPE.map((v, i) => {
+      if (i <= h) return Math.round(v * cfg.vol * rnd(0.86, 1.16));   // 已发生
+      return Math.round(v * cfg.vol * rnd(0.42, 0.72));               // 已知预约，尚未发生
+    });
+  },
+
+  /* 收货上架：标件按件、计重按 KG。上架数 = 已收，所以只需维护 到货 / 已收 / 已上架 三个量 */
+  buildReceiving() {
+    const t = RCV_TIER[demoMode];
+    const mk = (spec) => {
+      const arrived = spec.round(spec.base * t.k * rnd(0.95, 1.05));
+      const received = spec.round(arrived * (t.recv + rnd(-0.04, 0.04)));
+      return { arrived, received, putaway: spec.round(received * (t.put + rnd(-0.04, 0.04))) };
+    };
+    this.receiving = { piece: mk(RCV_SPEC.piece), weight: mk(RCV_SPEC.weight) };
+  },
+
+  /* 每轮向该档目标比例回归，而不是随机游走（随机游走跑久了必然顶死在 100%）：
+     收货率高于目标 → 安排一车新到货把比例拉回；上架率高于目标 → 本轮上架暂停。
+     数量只增不减，始终满足 已上架 ≤ 已收 ≤ 到货。 */
+  advanceReceiving() {
+    const t = RCV_TIER[demoMode];
+    ["piece", "weight"].forEach((key) => {
+      const r = this.receiving[key], spec = RCV_SPEC[key];
+      if (r.received / r.arrived > t.recv + 0.03 || Math.random() < 0.08) {
+        r.arrived = spec.round(r.arrived + spec.load());
+      }
+      r.received = spec.round(Math.min(r.arrived, r.received + spec.step()));
+      if (r.putaway / r.received < t.put + 0.03) {
+        r.putaway = spec.round(Math.min(r.received, r.putaway + spec.step()));
+      }
+    });
+  },
+
+  /* 订单人效榜：每人的单/时、今日累计单量、个人履约准时率 */
+  buildStaffPerf() {
+    const dip = demoMode === "storm" ? 4.5 : demoMode === "busy" ? 1.6 : 0;
+    this.staffPerf = STAFF.slice(0, 11)
+      .map((name) => ({
+        name,
+        uph: Math.round(rnd(64, 118)),
+        orders: Math.round(rnd(180, 460)),
+        rate: clamp(rnd(93.5, 99.6) - dip, 80, 100)
+      }))
+      .sort((a, b) => b.uph - a.uph).slice(0, 8);
+  },
+
+  /* prev 固定为昨日值，整天不变 —— 卡片上的 ▲/▼ 表示「较昨日」，不是较上一次刷新 */
+  buildQuality() {
+    const dip = demoMode === "storm" ? 6.5 : demoMode === "busy" ? 2.2 : 0;
+    const mk = (v) => {
+      const val = clamp(v - dip + rnd(-0.4, 0.4), 60, 99.9);
+      return { val, prev: clamp(val + rnd(-2.2, 2.2), 60, 99.9) };
+    };
+    const refund = clamp(0.72 + dip * 0.16 + rnd(-0.1, 0.1), 0.1, 6);
+    // 绝望订单：超出期望送达时间 ≥ 30 分钟的订单，今日累计，只增不减
+    const dsp = { calm: [0, 2, 1, 3], busy: [3, 6, 2, 4], storm: [12, 20, 3, 6] }[demoMode];
+    this.quality = {
+      overallOnTime: mk(96.4),
+      warehouseOnTime: mk(98.2),
+      deliveryOnTime: mk(94.6),
+      refundRate: { val: refund, prev: clamp(refund + rnd(-0.25, 0.25), 0.05, 6) },
+      despair: { count: rndInt(dsp[0], dsp[1]), prevSame: rndInt(dsp[2], dsp[3]), thresholdMin: 30 }
+    };
+  },
+
+  pickPlatform() {
+    let r = Math.random(), acc = 0;
+    for (const p of PLATFORMS) { acc += p.w; if (r <= acc) return p; }
+    return PLATFORMS[0];
+  },
+
+  /* 按指定“已等待秒数”造一张单 */
+  mkOrder(ageSec, key) {
+    const o = { no: nextNo(), seq: nextSeq(), platform: this.pickPlatform() };
+    o[key] = Date.now() - ageSec * 1000;
+    return o;
+  },
+
+  /* 把预警窗口内的单量补足到目标值：不足则按落在窗口正中的年龄补造 */
+  topUpWarn(arr, key, target, timeoutSec, leadSec) {
+    const now = Date.now();
+    const inWarn = arr.filter((o) => {
+      const age = (now - o[key]) / 1000;
+      return age >= timeoutSec - leadSec && age < timeoutSec;
+    }).length;
+    for (let i = inWarn; i < target; i++) {
+      arr.push(this.mkOrder(rnd(timeoutSec - leadSec + 4, timeoutSec - 4), key));
+    }
+  },
+
+  /* 把已超时的单量补足到目标值：超时时长散布在 1.05—2.2 倍标准之间，明细才有层次 */
+  topUpOver(arr, key, target, timeoutSec) {
+    const now = Date.now();
+    const inOver = arr.filter((o) => (now - o[key]) / 1000 >= timeoutSec).length;
+    for (let i = inOver; i < target; i++) {
+      arr.push(this.mkOrder(rnd(timeoutSec * 1.05, timeoutSec * 2.2), key));
+    }
+  },
+
+  /* 三个环节的超时区与预警区都补足 */
+  topUp(cfg) {
+    const N = (r) => rndInt(r[0], r[1]);
+    [
+      [this.claimOrders,    "assignedAt", T.claimTimeoutSec,   T.claimWarnLeadSec],
+      [this.pickOrders,     "enteredAt", T.pickTimeoutSec,     T.pickWarnLeadSec],
+      [this.checkOrders,    "checkedAt", T.checkTimeoutSec,    T.checkWarnLeadSec],
+      [this.handoverOrders, "readyAt",   T.handoverTimeoutSec, T.handoverWarnLeadSec]
+    ].forEach(([arr, key, timeout, lead]) => {
+      this.topUpOver(arr, key, N(cfg.overN), timeout);
+      this.topUpWarn(arr, key, N(cfg.warnN), timeout, lead);
+    });
+  },
+
+  reseed() {
+    const cfg = DEMO[demoMode], now = Date.now(), h = new Date().getHours();
+
+    this.buildTrend();
+    daySeq = sum(this.today.slice(0, h + 1));   // 订单序号接着今日已发生的单量往下走
+
+    // 待领取的考核窗口只有拣货的 1/4（2 分钟 vs 8 分钟），年龄分布同比例缩短
+    this.claimOrders = Array.from({ length: rndInt(cfg.pickN[0], cfg.pickN[1]) },
+      () => this.mkOrder(rnd(cfg.pickAge[0] * 0.25, cfg.pickAge[1] * 0.25), "assignedAt"));
+    this.pickOrders = Array.from({ length: rndInt(cfg.pickN[0], cfg.pickN[1]) },
+      () => this.mkOrder(rnd(cfg.pickAge[0], cfg.pickAge[1]), "enteredAt"));
+    this.checkOrders = Array.from({ length: rndInt(cfg.pickN[0], cfg.pickN[1]) },
+      () => this.mkOrder(rnd(cfg.pickAge[0] * 0.6, cfg.pickAge[1] * 0.7), "checkedAt"));
+    this.handoverOrders = Array.from({ length: rndInt(cfg.hoN[0], cfg.hoN[1]) },
+      () => this.mkOrder(rnd(cfg.hoAge[0], cfg.hoAge[1]), "readyAt"));
+
+    this.topUp(cfg);
+
+    this.buildReceiving();
+    this.buildQuality();
+    this.onlineStaff = rndInt(cfg.staff[0], cfg.staff[1]);
+    this.offlineStaff = rndInt(cfg.offline[0], cfg.offline[1]);
+    this.pendingPick = rndInt(cfg.pending[0], cfg.pending[1]);
+    this.picking = rndInt(cfg.picking[0], cfg.picking[1]);
+    this.checking = rndInt(cfg.checking[0], cfg.checking[1]);
+    this.delivering = rndInt(cfg.delivering[0], cfg.delivering[1]);
+  },
+
+  advance() {
+    const cfg = DEMO[demoMode], now = Date.now(), h = new Date().getHours();
+
+    this.pendingPick = clamp(this.pendingPick + rndInt(-2, 3), cfg.pending[0], cfg.pending[1]);
+    this.onlineStaff = clamp(this.onlineStaff + rndInt(-1, 1), cfg.staff[0], cfg.staff[1]);
+    this.offlineStaff = clamp(this.offlineStaff + rndInt(-1, 1), cfg.offline[0], cfg.offline[1]);
+    this.picking = clamp(this.picking + rndInt(-2, 2), cfg.picking[0], cfg.picking[1]);
+    this.checking = clamp(this.checking + rndInt(-2, 2), cfg.checking[0], cfg.checking[1]);
+    this.delivering = clamp(this.delivering + rndInt(-4, 5), cfg.delivering[0], cfg.delivering[1]);
+
+    // 当前小时单量持续累积；跨小时后重建整条曲线
+    if (this.today.length !== 24) this.buildTrend();
+    this.today[h] = Math.max(this.today[h], Math.round(this.today[h] + rndInt(0, 3)));
+
+    // 领取动作快，流出率高于拣货
+    this.claimOrders = this.claimOrders.filter(() => Math.random() > 0.25);
+    if (Math.random() < cfg.arrive || this.claimOrders.length < cfg.pickN[0]) {
+      this.claimOrders.push(this.mkOrder(rnd(0, 20), "assignedAt"));
+    }
+
+    this.pickOrders = this.pickOrders.filter(() => Math.random() > 0.18);
+    if (Math.random() < cfg.arrive || this.pickOrders.length < cfg.pickN[0]) {
+      this.pickOrders.push(this.mkOrder(rnd(0, 60), "enteredAt"));
+    }
+
+    this.checkOrders = this.checkOrders.filter(() => Math.random() > 0.2);
+    if (Math.random() < cfg.arrive || this.checkOrders.length < cfg.pickN[0]) {
+      this.checkOrders.push(this.mkOrder(rnd(0, 45), "checkedAt"));
+    }
+
+    this.handoverOrders = this.handoverOrders.filter(() => Math.random() > 0.16);
+    if (Math.random() < cfg.arrive || this.handoverOrders.length < cfg.hoN[0]) {
+      this.handoverOrders.push(this.mkOrder(rnd(0, 80), "readyAt"));
+    }
+
+    // 订单会不断穿过预警窗口、也会被随机流出带走；每轮补足，保证左栏和明细一直有内容
+    this.topUp(cfg);
+
+    this.advanceReceiving();
+
+    const bump = (list, k) => { list.forEach((r) => { r[k] = Math.max(10, r[k] + rndInt(-2, 3)); }); list.sort((a, b) => b[k] - a[k]); };
+    bump(this.staffPerf, "uph");
+    this.staffPerf.forEach((r) => {
+      r.orders += rndInt(0, 5);
+      r.rate = clamp(r.rate + rnd(-0.15, 0.15), 80, 100);
+    });
+
+    // 只动今日值，prev（昨日值）保持不变
+    const drift = (m, lo, hi) => { m.val = clamp(m.val + rnd(-0.12, 0.12), lo, hi); };
+    drift(this.quality.overallOnTime, 60, 99.9);
+    drift(this.quality.warehouseOnTime, 60, 99.9);
+    drift(this.quality.deliveryOnTime, 60, 99.9);
+    drift(this.quality.refundRate, 0.05, 6);
+    const dspRate = { calm: 0.01, busy: 0.03, storm: 0.07 }[demoMode];   // 每次刷新新增 1 单的概率
+    if (Math.random() < dspRate) this.quality.despair.count++;
+  }
+};
+
+/* ════════════════════════════════════════════════
+   4. ★ 数据接口层
+   接真实 API 时只需重写 DataSource.fetch()，返回同结构快照。
+   告警等级不在这里判定，由渲染层按 T（阈值）现算。
+   ════════════════════════════════════════════════ */
+const DataSource = {
+  async fetch() {
+    const now = Date.now(), h = new Date().getHours();
+    const todayActual = sum(MockEngine.today.slice(0, h + 1));
+    const yestSame = sum(MockEngine.yesterday.slice(0, h + 1));
+    const refundRate = MockEngine.quality.refundRate.val;
+
+    return {
+      ts: now,
+      warehouse: "丁兰云仓",
+      kpi: {
+        // 订单情况
+        totalOrders: todayActual,
+        refundCount: Math.max(0, Math.round(todayActual * refundRate / 100)),
+        refundRate: refundRate,
+        vsYesterday: yestSame > 0 ? (todayActual - yestSame) / yestSame * 100 : 0,
+        // 拣货 / 复核 / 配送：待办数直接取各环节订单池长度，保证与下方三张超时卡一致
+        picking: MockEngine.picking,
+        pendingPick: MockEngine.pendingPick,
+        checking: MockEngine.checking,
+        pendingCheck: MockEngine.checkOrders.length,
+        delivering: MockEngine.delivering,
+        pendingDeliver: MockEngine.handoverOrders.length,
+        // 人员情况
+        onlineStaff: MockEngine.onlineStaff,
+        offlineStaff: MockEngine.offlineStaff
+      },
+      trend: {
+        currentHour: h,
+        yesterday: MockEngine.yesterday.slice(),
+        today: MockEngine.today.slice()
+      },
+      timeoutClaim: MockEngine.claimOrders.map((o) => ({
+        orderNo: o.no, seq: o.seq, platform: o.platform, waitedSec: (now - o.assignedAt) / 1000
+      })),
+      timeoutPick: MockEngine.pickOrders.map((o) => ({
+        orderNo: o.no, seq: o.seq, platform: o.platform, waitedSec: (now - o.enteredAt) / 1000
+      })),
+      timeoutCheck: MockEngine.checkOrders.map((o) => ({
+        orderNo: o.no, seq: o.seq, platform: o.platform, waitedSec: (now - o.checkedAt) / 1000
+      })),
+      timeoutHandover: MockEngine.handoverOrders.map((o) => ({
+        orderNo: o.no, seq: o.seq, platform: o.platform, waitedSec: (now - o.readyAt) / 1000
+      })),
+      // 收货上架：上架数不单独下发，渲染层按「上架数 = 已收」取值
+      receiving: {
+        piece: { ...MockEngine.receiving.piece },
+        weight: { ...MockEngine.receiving.weight }
+      },
+      staffPerf: MockEngine.staffPerf.map((x) => ({ ...x })),
+      quality: MockEngine.quality
+    };
+  }
+};
+
+/* ════════════════════════════════════════════════
+   5. 告警条
+   ════════════════════════════════════════════════ */
+const AlertStream = {
+  items: [],
+  seen: new Map(),   // id → 首次告警时间，超期自动遗忘，避免长期运行内存增长
+  cursor: 0,
+  lastRoll: 0,
+
+  push(id, msg) {
+    if (this.seen.has(id)) return;
+    this.seen.set(id, Date.now());
+    this.items.unshift({ msg, at: new Date() });
+    if (this.items.length > 12) this.items.length = 12;
+    this.cursor = 0;
+    this.lastRoll = Date.now();
+    this.paint(true);
+  },
+
+  reset() { this.items = []; this.seen.clear(); this.cursor = 0; },
+
+  prune() {
+    const now = Date.now();
+    this.items = this.items.filter((a) => now - a.at.getTime() < 90000);
+    for (const [id, at] of this.seen) if (now - at > 300000) this.seen.delete(id);
+    if (this.cursor >= this.items.length) this.cursor = 0;
+  },
+
+  tick() {
+    this.prune();
+    if (this.items.length > 1 && Date.now() - this.lastRoll > 4000) {
+      this.cursor = (this.cursor + 1) % this.items.length;
+      this.lastRoll = Date.now();
+      this.paint(true);
+      return;
+    }
+    this.paint(false);
+  },
+
+  paint(animate) {
+    const n = this.items.length;
+    $("annun").dataset.alert = n > 0 ? "1" : "0";
+    $("annun-count").textContent = n;
+    const msgEl = $("annun-msg");
+    if (n === 0) {
+      msgEl.textContent = "系统就绪，暂无异常";
+      $("annun-time").textContent = hhmm(new Date());
+    } else {
+      const a = this.items[this.cursor];
+      msgEl.textContent = a.msg;
+      $("annun-time").textContent = hhmm(a.at);
+    }
+    if (animate) {
+      msgEl.classList.remove("annun-roll");
+      void msgEl.offsetWidth;
+      msgEl.classList.add("annun-roll");
+    }
+  }
+};
+
+/* ════════════════════════════════════════════════
+   6. 渲染
+   ════════════════════════════════════════════════ */
+let snapshot = null;
+const MAX_ROWS = 7;
+const LV_CLAIM = { ok: "待领取", warn: "超时预警", over: "已超时" };
+const LV_PICK  = { ok: "待拣货", warn: "超时预警", over: "已超时" };
+const LV_CHECK = { ok: "待复核", warn: "超时预警", over: "已超时" };
+const LV_HO    = { ok: "待取货", warn: "超时预警", over: "已超时" };
+
+/* ── ① KPI 条：五个环节容器 ── */
+function renderKpi(s) {
+  const k = s.kpi;
+
+  $("v-total").textContent = comma(k.totalOrders);
+  $("v-refund").textContent = k.refundCount;
+
+  $("v-picking").textContent = k.picking;
+  $("v-pending").textContent = k.pendingPick;
+
+  $("v-checking").textContent = k.checking;
+  $("v-pendcheck").textContent = k.pendingCheck;
+
+  $("v-delivering").textContent = k.delivering;
+  $("v-penddeliver").textContent = k.pendingDeliver;
+
+  $("v-staff").textContent = k.onlineStaff;
+  $("v-offline").textContent = k.offlineStaff;
+
+  // 原始需求：待拣货订单超过在线员工数时界面变红 —— 整个「拣货情况」容器转红
+  const overloaded = k.pendingPick > k.onlineStaff * T.loadFactor;
+  $("k-pick").dataset.alarm = overloaded ? "1" : "0";
+  if (overloaded) {
+    AlertStream.push(
+      "overload|" + Math.floor(Date.now() / 30000),
+      "拣选超载：待拣货 " + k.pendingPick + " 单 > 在线 " + k.onlineStaff + " 人"
+    );
+  }
+}
+
+/* Catmull-Rom 转三次贝塞尔，得到平滑曲线；控制点钳在绘图区内，防止过冲穿出上下边界 */
+function smoothPath(pts, top, bot) {
+  if (!pts.length) return "";
+  if (pts.length === 1) return "M" + pts[0][0].toFixed(1) + "," + pts[0][1].toFixed(1);
+  const k = 0.72;
+  const cy = (v) => clamp(v, top, bot);
+  let d = "M" + pts[0][0].toFixed(1) + "," + pts[0][1].toFixed(1);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6 * k;
+    const c1y = cy(p1[1] + (p2[1] - p0[1]) / 6 * k);
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6 * k;
+    const c2y = cy(p2[1] - (p3[1] - p1[1]) / 6 * k);
+    d += "C" + c1x.toFixed(1) + "," + c1y.toFixed(1) + " " +
+                c2x.toFixed(1) + "," + c2y.toFixed(1) + " " +
+                p2[0].toFixed(1) + "," + p2[1].toFixed(1);
+  }
+  return d;
+}
+
+/* ── ② 订单趋势图 ──
+   一条 0—23 时轴上三段信息：昨日全天（参照）／今日已发生（实线）／今日已知预约（虚线）
+   每点带圆点与数值。标签防重叠规则：同一小时里位置高的那条朝上标、低的朝下标，两者永不相撞。 */
+function renderTrend(s) {
+  const t = s.trend, h = t.currentHour;
+  const L = 44, R = 1826, TOP = 24, BOT = 94, AXIS = 126;   // 与 SVG viewBox 高 136 对应
+  const maxV = Math.max(...t.yesterday, ...t.today, 10);
+  const niceMax = Math.ceil(maxV / 20) * 20;
+  const xAt = (i) => L + (i / 23) * (R - L);
+  const yAt = (v) => BOT - (v / niceMax) * (BOT - TOP);
+  const seg = (arr, from, to) => arr.slice(from, to + 1).map((v, i) => [xAt(from + i), yAt(v)]);
+  const areaOf = (d, x0, x1) => d + "L" + x1.toFixed(1) + "," + BOT + "L" + x0.toFixed(1) + "," + BOT + "Z";
+
+  let g = '<defs>' +
+    '<linearGradient id="todayFill" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%" stop-color="#7FB8FF" stop-opacity=".26"/>' +
+      '<stop offset="100%" stop-color="#7FB8FF" stop-opacity="0"/></linearGradient>' +
+    '<linearGradient id="bookFill" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%" stop-color="#7FB8FF" stop-opacity=".09"/>' +
+      '<stop offset="100%" stop-color="#7FB8FF" stop-opacity="0"/></linearGradient>' +
+    "</defs>";
+
+  // 横向网格 + y 轴刻度
+  for (let i = 0; i <= 2; i++) {
+    const v = niceMax / 2 * i, y = yAt(v);
+    g += '<line class="grid" x1="' + L + '" y1="' + y.toFixed(1) + '" x2="' + R + '" y2="' + y.toFixed(1) + '"/>';
+    g += '<text class="y-t" x="' + (L - 8) + '" y="' + (y + 3.5).toFixed(1) + '">' + Math.round(v) + "</text>";
+  }
+
+  // 每小时竖向网格 + x 轴刻度 0—23
+  for (let i = 0; i < 24; i++) {
+    const x = xAt(i).toFixed(1);
+    g += '<line class="vgrid" x1="' + x + '" y1="' + TOP + '" x2="' + x + '" y2="' + BOT + '"/>';
+    g += '<text class="axis-t" x="' + x + '" y="' + AXIS + '">' + i + "</text>";
+  }
+
+  // 昨日参照线（平滑，全 24 小时）
+  g += '<path class="ln-yest" d="' + smoothPath(seg(t.yesterday, 0, 23), TOP, BOT) + '"/>';
+
+  // 今日已发生：面积 + 实线
+  const actual = seg(t.today, 0, h);
+  const dActual = smoothPath(actual, TOP, BOT);
+  g += '<path class="ar-today" d="' + areaOf(dActual, xAt(0), xAt(h)) + '"/>';
+  g += '<path class="ln-today" d="' + dActual + '"/>';
+
+  // 今日已知预约：自当前小时接续，虚线 + 更淡的面积画到 23 时
+  if (h < 23) {
+    const dBook = smoothPath(seg(t.today, h, 23), TOP, BOT);
+    g += '<path class="ar-book" d="' + areaOf(dBook, xAt(h), xAt(23)) + '"/>';
+    g += '<path class="ln-book" d="' + dBook + '"/>';
+  }
+
+  // 圆点 + 数值标签（高者朝上、低者朝下，杜绝两条线的标签重叠）
+  let dots = "", labels = "";
+  for (let i = 0; i < 24; i++) {
+    const x = xAt(i);
+    const ty = yAt(t.today[i]), yy = yAt(t.yesterday[i]);
+    const future = i > h;
+    dots += '<circle class="pt ' + (future ? "pt-book" : "pt-today") + '" cx="' + x.toFixed(1) + '" cy="' + ty.toFixed(1) + '" r="3"/>';
+    dots += '<circle class="pt pt-yest" cx="' + x.toFixed(1) + '" cy="' + yy.toFixed(1) + '" r="2.6"/>';
+
+    const todayHigher = t.today[i] >= t.yesterday[i];
+    labels += '<text class="lb ' + (future ? "lb-book" : "lb-today") + '" x="' + x.toFixed(1) +
+      '" y="' + (todayHigher ? ty - 9 : ty + 15).toFixed(1) + '">' + t.today[i] + "</text>";
+    labels += '<text class="lb lb-yest" x="' + x.toFixed(1) +
+      '" y="' + (todayHigher ? yy + 15 : yy - 9).toFixed(1) + '">' + t.yesterday[i] + "</text>";
+  }
+  g += dots + labels;
+
+  // “现在”分界：竖线 + 顶部标签
+  const nx = xAt(h);
+  g += '<line class="now-ln" x1="' + nx.toFixed(1) + '" y1="' + (TOP - 6) + '" x2="' + nx.toFixed(1) + '" y2="' + BOT + '"/>';
+  g += '<rect class="now-chip" x="' + (nx - 19).toFixed(1) + '" y="0" width="38" height="14" rx="3"/>';
+  g += '<text class="now-t" x="' + nx.toFixed(1) + '" y="10">现在</text>';
+
+  $("trend-plot").innerHTML = g;
+
+  $("meta-trend").innerHTML =
+    "今日已发生 <b>" + comma(sum(t.today.slice(0, h + 1))) + "</b> 单 · " +
+    "剩余已知预约 <b>" + comma(sum(t.today.slice(h + 1))) + "</b> 单 · " +
+    "昨日全天 <b>" + comma(sum(t.yesterday)) + "</b> 单";
+}
+
+/* 左栏只呈现「超时预警」一个数：有值时琥珀高亮，归零时整栏沉为灰色 */
+function paintWarnStat(paneId, numId, n) {
+  $(paneId).dataset.zero = n > 0 ? "0" : "1";
+  $(numId).textContent = n;
+}
+
+function moreRow(total) {
+  return total > MAX_ROWS
+    ? '<div class="trow-more">还有 ' + (total - MAX_ROWS) + " 单未显示 · 已按等待时长倒序</div>"
+    : "";
+}
+
+/* ── 四张超时卡 ──
+   领取 → 拣货 → 复核 → 骑手取货，四个环节结构完全一致，用同一个渲染器 + 四份配置。 */
+const TIMEOUT_CARDS = [
+  {
+    src: "timeoutClaim", pane: "meta-claim", num: "warn-n-claim", body: "body-claim",
+    stdEl: "lg-claim-over", leadEl: "lg-claim-warn", tag: "claim", lv: LV_CLAIM,
+    empty: "无待领取超时订单",
+    std: () => T.claimTimeoutSec, lead: () => T.claimWarnLeadSec,
+    alert: (r) => r.platform.short + " " + r.seq + " 号单已分配未领取 " + mmss(r.waitedSec) + " · " + r.orderNo
+  },
+  {
+    src: "timeoutPick", pane: "meta-pick", num: "warn-n-pick", body: "body-pick",
+    stdEl: "lg-pick-over", leadEl: "lg-pick-warn", tag: "pick", lv: LV_PICK,
+    empty: "无待拣货超时订单",
+    std: () => T.pickTimeoutSec, lead: () => T.pickWarnLeadSec,
+    alert: (r) => r.platform.short + " " + r.seq + " 号单待拣货超时 " + mmss(r.waitedSec) + " · " + r.orderNo
+  },
+  {
+    src: "timeoutCheck", pane: "meta-check", num: "warn-n-check", body: "body-check",
+    stdEl: "lg-ck-over", leadEl: "lg-ck-warn", tag: "check", lv: LV_CHECK,
+    empty: "无待复核超时订单",
+    std: () => T.checkTimeoutSec, lead: () => T.checkWarnLeadSec,
+    alert: (r) => r.platform.short + " " + r.seq + " 号单待复核超时 " + mmss(r.waitedSec) + " · " + r.orderNo
+  },
+  {
+    src: "timeoutHandover", pane: "meta-handover", num: "warn-n-ho", body: "body-handover",
+    stdEl: "lg-ho-over", leadEl: "lg-ho-warn", tag: "ho", lv: LV_HO,
+    empty: "无待取货超时订单",
+    std: () => T.handoverTimeoutSec, lead: () => T.handoverWarnLeadSec,
+    alert: (r) => r.platform.short + "骑手未取 " + r.seq + " 号单 " + mmss(r.waitedSec) + " · " + r.orderNo
+  }
+];
+
+function renderTimeoutCard(c, s) {
+  const std = c.std(), lead = c.lead();
+  const all = s[c.src]
+    .map((o) => ({ ...o, lv: levelOf(o.waitedSec, std, lead) }))
+    .sort((a, b) => b.waitedSec - a.waitedSec);
+
+  // 预警数取自全量：预警单不进明细，但它的计数必须照常统计
+  paintWarnStat(c.pane, c.num, all.filter((r) => r.lv === "warn").length);
+
+  const rows = all.filter((r) => r.lv === "over");   // 明细只列已超时
+
+  $(c.body).innerHTML = rows.length
+    ? rows.slice(0, MAX_ROWS).map((r) =>
+        '<div class="trow" data-level="' + r.lv + '">' +
+          '<span class="chip" data-p="' + r.platform.key + '">' + r.platform.short + "</span>" +
+          '<span class="t-seq">' + r.seq + "</span>" +
+          '<span class="t-no">' + r.orderNo + "</span>" +
+          '<span class="t-dur">' + mmss(r.waitedSec) + "</span>" +
+          '<span class="t-badge">' + c.lv[r.lv] + "</span>" +
+        "</div>"
+      ).join("") + moreRow(rows.length)
+    : '<div class="empty"><span class="empty-icn">✓</span><span class="empty-t">' + c.empty + "</span></div>";
+
+  rows.forEach((r) => AlertStream.push(r.orderNo + "|" + c.tag, c.alert(r)));
+
+  $(c.leadEl).textContent = Math.round(lead / 6) / 10;
+  $(c.stdEl).textContent = Math.round(std / 6) / 10;
+}
+
+function renderTimeoutCards(s) { TIMEOUT_CARDS.forEach((c) => renderTimeoutCard(c, s)); }
+
+/* ── ⑤ 待收货上架余量：标件 / 计重 × 收货 / 上架 ── */
+const fmtKg = (v) => { const [i, d] = v.toFixed(1).split("."); return comma(+i) + "." + d; };
+const RCV_BLOCKS = [
+  { key: "piece",  name: "标件收货", unit: "按件数统计 · 件", fmt: comma },
+  { key: "weight", name: "计重收货", unit: "按重量统计 · KG", fmt: fmtKg }
+];
+
+function renderInbound(s) {
+  const pct = (a, b) => (b > 0 ? a / b * 100 : 0);
+  const stage = (label, rate, k1, v1, k2, v2) =>
+    '<div class="rs">' +
+      '<div class="rs-top"><span class="rs-k">' + label + '</span>' +
+        '<span class="rs-rate">' + rate.toFixed(1) + "<i>%</i></span></div>" +
+      '<span class="rs-bar"><span class="rs-fill" style="width:' + clamp(rate, 0, 100).toFixed(1) + '%"></span></span>' +
+      '<div class="rs-nums">' +
+        '<span class="rs-n"><span>' + k1 + "</span><b>" + v1 + "</b></span>" +
+        '<span class="rs-n"><span>' + k2 + "</span><b>" + v2 + "</b></span>" +
+      "</div>" +
+    "</div>";
+
+  $("rcv-list").innerHTML = RCV_BLOCKS.map((b) => {
+    const r = s.receiving[b.key];
+    const shelf = r.received;   // 上架数 = 已收
+    return '<div class="rcv" data-k="' + b.key + '">' +
+      '<div class="rcv-hd"><span class="rcv-name">' + b.name + '</span><span class="rcv-unit">' + b.unit + "</span></div>" +
+      '<div class="rcv-stages">' +
+        stage("收货完成率", pct(r.received, r.arrived), "今日到货", b.fmt(r.arrived), "已收", b.fmt(r.received)) +
+        '<span class="rcv-div"></span>' +
+        stage("上架完成率", pct(r.putaway, shelf), "上架数", b.fmt(shelf), "已上架", b.fmt(r.putaway)) +
+      "</div>" +
+    "</div>";
+  }).join("");
+}
+
+/* ── ⑥ 人效排名：订单人效 TOP 榜 + 个人履约率 ── */
+function renderEfficiency(s) {
+  const list = s.staffPerf;
+  const max = Math.max(...list.map((r) => r.uph), 1);
+  const rateLv = (v) => (v >= 98 ? "good" : v >= 95 ? "warn" : "bad");
+
+  $("rank-list").innerHTML = list.map((r, i) =>
+    '<div class="rank" data-top="' + (i < 3 ? i + 1 : 0) + '">' +
+      '<span class="rk-no">' + (i + 1) + "</span>" +
+      '<span class="rk-name">' + r.name + "</span>" +
+      '<span class="rk-bar"><span class="rk-fill" style="width:' + (r.uph / max * 100).toFixed(1) + '%"></span></span>' +
+      '<span class="rk-val"><span class="rk-main">' + r.uph + '</span><span class="rk-sub">单/时</span></span>' +
+      '<span class="rk-rate" data-lv="' + rateLv(r.rate) + '">' + r.rate.toFixed(1) + "<i>%</i></span>" +
+    "</div>"
+  ).join("");
+}
+
+/* ── ⑦ 履约质量：核心「订单履约率」+ 三个比率 + 绝望订单 ── */
+const HERO_DEF = { key:"overallOnTime", label:"订单履约率", invert:false };
+const QUALITY_DEFS = [
+  { key:"warehouseOnTime", label:"仓内履约率", invert:false },
+  { key:"deliveryOnTime",  label:"配送准时率", invert:false },
+  { key:"refundRate",      label:"退款率",     invert:true  }
+];
+
+function qualityLevel(val, invert) {
+  if (invert) return val <= 1 ? "good" : val <= 2 ? "warn" : "bad";
+  return val >= 95 ? "good" : val >= 90 ? "warn" : "bad";
+}
+
+/* 较昨日：▲ 表示变好、▼ 表示变差（退款率下降也算变好） */
+function deltaOf(m, invert) {
+  const delta = m.val - m.prev;
+  const better = invert ? delta < 0 : delta > 0;
+  const dir = Math.abs(delta) < 0.02 ? "flat" : better ? "up" : "down";
+  return { dir, text: (dir === "flat" ? "→" : better ? "▲" : "▼") + " " + Math.abs(delta).toFixed(2) };
+}
+
+/* 环形进度：退款率按「离 5% 上限还有多远」画，视觉上越满越好 */
+function ringSVG(cls, size, stroke, m, invert, bgCls, fgCls) {
+  const r = (size - stroke) / 2, c = 2 * Math.PI * r, mid = size / 2;
+  const ratio = invert ? clamp(1 - m.val / 5, 0, 1) : clamp(m.val / 100, 0, 1);
+  return '<svg class="' + cls + '" viewBox="0 0 ' + size + " " + size + '" aria-hidden="true">' +
+    '<circle class="' + bgCls + '" cx="' + mid + '" cy="' + mid + '" r="' + r + '"></circle>' +
+    '<circle class="' + fgCls + '" cx="' + mid + '" cy="' + mid + '" r="' + r +
+      '" stroke-dasharray="' + (ratio * c).toFixed(1) + " " + c.toFixed(1) + '"></circle>' +
+  "</svg>";
+}
+
+function renderQuality(s) {
+  const q = s.quality;
+
+  // 核心指标：大圆环，数字与较昨日写在环内
+  const h = q[HERO_DEF.key], hd = deltaOf(h, HERO_DEF.invert);
+  $("q-hero").dataset.lv = qualityLevel(h.val, HERO_DEF.invert);
+  $("q-hero").innerHTML =
+    ringSVG("hero-ring", 160, 12, h, HERO_DEF.invert, "h-bg", "h-fg") +
+    '<div class="hero-in">' +
+      '<span class="hero-k">' + HERO_DEF.label + "</span>" +
+      '<span class="hero-v"><span class="hero-n">' + h.val.toFixed(1) + '</span><span class="hero-p">%</span></span>' +
+      '<span class="hero-d" data-dir="' + hd.dir + '">较昨日 ' + hd.text + "</span>" +
+    "</div>";
+
+  // 右侧 2×2：三个比率 + 绝望订单
+  $("quality-grid").innerHTML = QUALITY_DEFS.map((d) => {
+    const m = q[d.key], dl = deltaOf(m, d.invert);
+    return '<div class="qcard" data-lv="' + qualityLevel(m.val, d.invert) + '">' +
+      ringSVG("donut", 48, 5, m, d.invert, "d-bg", "d-fg") +
+      '<div class="q-right">' +
+        '<span class="q-label">' + d.label + "</span>" +
+        '<span class="q-val"><span class="q-num">' + m.val.toFixed(1) + '</span><span class="q-pct">%</span>' +
+        '<span class="q-trend" data-dir="' + dl.dir + '">' + dl.text + "</span></span>" +
+      "</div>" +
+    "</div>";
+  }).join("") + despairCard(q.despair);
+}
+
+/* 绝望订单：超出期望送达时间 ≥ N 分钟的今日累计单数。N 由数据下发，口径以后端为准 */
+function despairCard(d) {
+  const diff = d.count - d.prevSame;
+  // 计数越多越糟：比昨日同期多 → 红，少 → 绿
+  const dir = diff > 0 ? "up" : diff < 0 ? "down" : "flat";
+  return '<div class="qcard despair" data-zero="' + (d.count > 0 ? 0 : 1) + '">' +
+    '<span class="dp-n">' + d.count + "</span>" +
+    '<div class="q-right">' +
+      '<span class="q-label">绝望订单<span class="dp-tag">今日累计</span></span>' +
+      '<span class="dp-rule">超期望送达 ≥' + d.thresholdMin + " 分钟</span>" +
+      '<span class="dp-cmp" data-dir="' + dir + '">较昨日同期 ' +
+        (diff > 0 ? "▲ " : diff < 0 ? "▼ " : "→ ") + Math.abs(diff) + "</span>" +
+    "</div>" +
+  "</div>";
+}
+
+/* ── 整屏渲染 ── */
+function renderAll(s) {
+  snapshot = s;
+  $("wh-name").textContent = s.warehouse;
+  renderKpi(s);
+  renderTrend(s);
+  renderTimeoutCards(s);
+  renderInbound(s);
+  renderEfficiency(s);
+  renderQuality(s);
+  $("live-txt").textContent = "实时 · " + hhmm(new Date()) + " 更新";
+}
+
+/* 每秒只重算时间敏感的三张超时表，其余等刷新周期 */
+function renderTimeSensitive() {
+  if (!snapshot) return;
+  const drift = (Date.now() - snapshot.ts) / 1000;
+  const aged = { ...snapshot };
+  TIMEOUT_CARDS.forEach((c) => {
+    aged[c.src] = snapshot[c.src].map((o) => ({ ...o, waitedSec: o.waitedSec + drift }));
+  });
+  renderTimeoutCards(aged);
+}
+
+/* ════════════════════════════════════════════════
+   7. 启动：舞台缩放 / 时钟 / 循环 / 交互
+   ════════════════════════════════════════════════ */
+const STAGE_W = 1920, STAGE_H = 1080;
+function fitStage() {
+  $("stage").style.transform =
+    "scale(" + Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H) + ")";
+}
+
+function tickClock() {
+  const d = new Date();
+  $("clock").innerHTML = pad2(d.getHours()) + ":" + pad2(d.getMinutes()) +
+    '<span class="cs">:' + pad2(d.getSeconds()) + "</span>";
+}
+
+function paintDemoTag() {
+  $("demo-tag").innerHTML =
+    "模拟数据 · <b>" + DEMO[demoMode].tag + "</b>" +
+    '<span class="demo-sep">|</span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 切换演示强度';
+}
+
+async function refresh() {
+  MockEngine.advance();
+  renderAll(await DataSource.fetch());
+}
+
+function setDemo(mode) {
+  demoMode = mode;
+  paintDemoTag();
+  AlertStream.reset();
+  MockEngine.buildStaffPerf();
+  MockEngine.reseed();
+  DataSource.fetch().then(renderAll);
+  AlertStream.paint(true);
+}
+
+
+/* ── 事件 ── */
+document.addEventListener("keydown", (e) => {
+  if (e.key === "1") setDemo("calm");
+  else if (e.key === "2") setDemo("busy");
+  else if (e.key === "3") setDemo("storm");
+});
+
+window.addEventListener("resize", fitStage);
+
+/* ── 启动 ── */
+fitStage();
+tickClock();
+MockEngine.init();
+paintDemoTag();
+DataSource.fetch().then(renderAll);
+AlertStream.paint(false);
+
+setInterval(() => { tickClock(); renderTimeSensitive(); AlertStream.tick(); }, 1000);
+setInterval(refresh, T.refreshMs);
+</script>
+</body>
+</html>

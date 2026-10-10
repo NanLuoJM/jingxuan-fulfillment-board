@@ -1,0 +1,17 @@
+# 妙搭部署仓库：自带独立 git，内容是 index.html 的发布副本，不纳入本仓库
+jingxuan-board/
+
+# 测试与静态检查缓存（全局规范要求；忽略只防提交，不代表可以留着）
+.pytest_cache/
+.pytest-tmp*/
+.ruff_cache/
+__pycache__/
+.mypy_cache/
+.coverage
+htmlcov/
+node_modules/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
